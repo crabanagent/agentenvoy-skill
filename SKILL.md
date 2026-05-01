@@ -55,17 +55,15 @@ Session ID is returned in the booking confirmation.
 - **Availability window**: `agent.json` only returns ~5 days of slots. For further dates, book directly with the UTC timestamp or use the browser.
 - **Score ≤ 2**: Only slots with score 0-2 are bookable. Higher scores are protected/hidden.
 
-## Browser Fallback
+## Cancellation
 
-If the API doesn't support what you need (e.g., slots beyond the 5-day window, negotiation with Envoy, group events), use the browser:
+`cancel_meeting` requires the **session-specific URL** (the one with the code, e.g., `https://agentenvoy.ai/meet/johnanderson/a2tztn`), not just the vanity URL. The session code is found in the calendar event description under "Need to change or cancel?". The `sessionId` parameter is optional — the session URL alone is sufficient.
 
-1. Navigate to the meeting URL
-2. Chat with the Envoy agent — it understands natural language
-3. Pick a time slot from the calendar widget or describe your preferred time
-4. Provide name and email when asked
-5. Confirm the booking
+```
+agentenvoy.sh cancel https://agentenvoy.ai/meet/johnanderson/a2tztn
+```
 
-The browser path is slower but handles edge cases the API doesn't cover.
+**Important:** The vanity URL (`/meet/johnanderson`) alone returns `session_not_found` for cancel operations. Always use the full session URL from the booking confirmation or calendar event.
 
 ## API Details
 

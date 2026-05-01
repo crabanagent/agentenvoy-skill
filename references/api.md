@@ -160,10 +160,12 @@ JSON-RPC call to `cancel_meeting`. Deletes the GCal event and dispatches cancell
 ```
 
 **Arguments:**
-- `meetingUrl` (required) — Must include the session code for cancel operations.
-- `sessionId` (optional) — The session ID from the booking confirmation.
+- `meetingUrl` (required) — Must include the session code for cancel operations. The vanity URL alone will not work.
 - `notifyHost` (required) — `true` to send cancellation email to the host.
+- `sessionId` (optional) — The session ID from the booking confirmation (not needed with session URL).
 - `reason` (optional) — Cancellation reason (max 1000 chars).
+
+**Note:** The `propose_lock` response returns a `sessionId` but NOT the session code URL. The session code appears in the Google Calendar event description. If you need to cancel programmatically, extract the session code from the calendar event's description field.
 
 ### 4. MCP tool schema: `GET https://agentenvoy.ai/.well-known/mcp.json`
 

@@ -17,13 +17,13 @@ Usage:
       Book a specific slot. iso_start_utc is UTC ISO 8601 (e.g., 2026-05-07T21:30:00Z).
       format: video (default), phone, or in-person.
 
-  agentenvoy.sh cancel <meeting_url> <session_id>
-      Cancel a confirmed booking. Notifies the host by default.
+  agentenvoy.sh cancel <session_url_with_code>
+      Cancel a confirmed booking. Requires the session-specific URL (found in the calendar event description).
 
 Examples:
   agentenvoy.sh availability https://agentenvoy.ai/meet/johnanderson
   agentenvoy.sh book https://agentenvoy.ai/meet/johnanderson 2026-05-07T21:30:00Z "Bryan Schwab" bryan@schwab.sh video
-  agentenvoy.sh cancel https://agentenvoy.ai/meet/johnanderson cmok854hm000113il5mj3ecew
+  agentenvoy.sh cancel https://agentenvoy.ai/meet/johnanderson/a2tztn
 EOF
   exit 1
 }
@@ -167,9 +167,26 @@ PYEOF
 
   cancel|cancel_lock|cancel_meeting)
     SESSION_ID="${3:-}"
-    [[ -z "$SESSION_ID" ]] && usage
+    SESSION_URL="${4:-}"
+    # cancel_meeting requires the session-specific URL (e.g., /meet/slug/CODE), not just the vanity URL
+    # If a full session URL is provided as the 2nd arg, use it directly
+    # If only vanity URL + sessionId given, we need to find the session code from calendar description
+    if [[ "$MEETING_URL" == */meet/*/* ]]; then
+      # Already a session-specific URL (contains the code)
+      CANCEL_URL="$MEETING_URL"
+    else
+      # Vanity URL — check if SESSION_URL is provided as 4th arg
+      if [[ -n "$SESSION_URL" ]]; then
+        CANCEL_URL="$SESSION_URL"
+      else
+        echo "⚠️  cancel_meeting requires the session-specific URL (e.g., https://agentenvoy.ai/meet/johnanderson/abc123)" >&2
+        echo "   The vanity URL alone won't work. Find the session code in the calendar event description." >&2
+        echo "   Usage: agentenvoy.sh cancel <session_url_with_code>" >&2
+        exit 1
+      fi
+    fi
 
-    echo "Cancelling session $SESSION_ID..." >&2
+    echo "Cancelling booking at ${CANCEL_URL}..." >&2
 
     PAYLOAD=$(python3 -c "
 import json, sys
@@ -181,13 +198,12 @@ payload = {
         'name': 'cancel_meeting',
         'arguments': {
             'meetingUrl': sys.argv[1],
-            'sessionId': sys.argv[2],
             'notifyHost': True
         }
     }
 }
 print(json.dumps(payload))
-" "$MEETING_URL" "$SESSION_ID")
+" "$CANCEL_URL")
 
     TMPFILE=$(mktemp)
     trap "rm -f $TMPFILE" EXIT
