@@ -45,18 +45,11 @@ curl -s 'https://agentenvoy.ai/meet/johnanderson/agent.json'
     "timezone": { "value": "America/Los_Angeles" },
     "guestMustResolve": ["format"]
   },
-  "booking": {
-    "endpoint": "https://agentenvoy.ai/api/mcp",
-    "method": "POST",
-    "tool": "propose_lock",
-    "auth": "url-capability",
-    "tokenParam": "meetingUrl"
-  },
   "slots": [
     {
       "start": "2026-05-07T21:30:00.000Z",
       "end": "2026-05-07T22:00:00.000Z",
-      "localStart": "2026-05-07T14:30:00",
+      "localStart": "2026-05-07T14:30:00-07:00",
       "score": 0,
       "tier": "first_offer"
     }
@@ -66,13 +59,13 @@ curl -s 'https://agentenvoy.ai/meet/johnanderson/agent.json'
 
 **Key fields:**
 - `slots[].start` — UTC ISO 8601 timestamp (use this for booking)
-- `slots[].localStart` — host's local time
+- `slots[].localStart` — host's local time with timezone offset (full ISO 8601)
 - `slots[].score` — protection score: 0 (open) to 5 (immovable). Only score ≤ 2 is bookable.
 - `slots[].tier` — availability tier: `first_offer` (best), `available`, etc.
 - `parameters.format.guestMustResolve` — if true, format must be specified when booking
 - `parameters.format.allowedValues` — valid format values
 
-**Note:** `agent.json` only returns slots for the next ~5 days. For further-out dates, the MCP negotiate endpoint can query future availability, or you can book a slot directly if you know the UTC time.
+**Note:** `agent.json` only returns slots for the next ~5 days. For further-out dates, you can book a slot directly if you know the UTC time, or use the browser chat.
 
 ### 2. Book a meeting: `POST https://agentenvoy.ai/api/mcp`
 
@@ -124,6 +117,7 @@ Accept: application/json, text/event-stream
     "structuredContent": {
       "ok": true,
       "sessionId": "cmok854hm000113il5mj3ecew",
+      "meetingUrl": "https://agentenvoy.ai/meet/johnanderson/a2tztn",
       "status": "confirmed",
       "dateTime": "2026-05-07T21:30:00.000Z",
       "duration": 30,
@@ -136,11 +130,11 @@ Accept: application/json, text/event-stream
 }
 ```
 
+**Save both `sessionId` and `meetingUrl`** from the response — they're needed for cancellation and rescheduling.
+
 ### 3. Cancel a booking: `POST https://agentenvoy.ai/api/mcp`
 
 JSON-RPC call to `cancel_meeting`. Deletes the GCal event and dispatches cancellation emails.
-
-**Important:** The `meetingUrl` must include the session code (e.g., `https://agentenvoy.ai/meet/johnanderson/abc123`) when cancelling. The vanity URL alone won't find the session.
 
 **Request:**
 ```json
@@ -151,7 +145,7 @@ JSON-RPC call to `cancel_meeting`. Deletes the GCal event and dispatches cancell
   "params": {
     "name": "cancel_meeting",
     "arguments": {
-      "meetingUrl": "https://agentenvoy.ai/meet/johnanderson/g8jxe8",
+      "meetingUrl": "https://agentenvoy.ai/meet/johnanderson",
       "sessionId": "cmok854hm000113il5mj3ecew",
       "notifyHost": true
     }
@@ -160,12 +154,10 @@ JSON-RPC call to `cancel_meeting`. Deletes the GCal event and dispatches cancell
 ```
 
 **Arguments:**
-- `meetingUrl` (required) — Must include the session code for cancel operations. The vanity URL alone will not work.
+- `meetingUrl` (required) — The host's vanity scheduling URL (session code URL also works).
+- `sessionId` (recommended) — The session ID from the booking response. Makes cancellation reliable.
 - `notifyHost` (required) — `true` to send cancellation email to the host.
-- `sessionId` (optional) — The session ID from the booking confirmation (not needed with session URL).
 - `reason` (optional) — Cancellation reason (max 1000 chars).
-
-**Note:** The `propose_lock` response returns a `sessionId` but NOT the session code URL. The session code appears in the Google Calendar event description. If you need to cancel programmatically, extract the session code from the calendar event's description field.
 
 ### 4. MCP tool schema: `GET https://agentenvoy.ai/.well-known/mcp.json`
 
@@ -212,3 +204,4 @@ The browser is also useful when:
 | 406 | Missing `Accept: application/json, text/event-stream` | Add both content types to Accept header |
 | Slot conflict | Another booking took the slot | Check availability again, pick a new slot |
 | Invalid format | Format not in `allowedValues` | Check `agent.json` parameters for valid formats |
+| session_not_found | Wrong URL or sessionId for cancel | Use the vanity URL + sessionId from booking response |

@@ -17,13 +17,13 @@ Usage:
       Book a specific slot. iso_start_utc is UTC ISO 8601 (e.g., 2026-05-07T21:30:00Z).
       format: video (default), phone, or in-person.
 
-  agentenvoy.sh cancel <session_url_with_code>
-      Cancel a confirmed booking. Requires the session-specific URL (found in the calendar event description).
+  agentenvoy.sh cancel <meeting_url> <session_id>
+      Cancel a confirmed booking. Uses the vanity meeting URL + sessionId from the booking response.
 
 Examples:
   agentenvoy.sh availability https://agentenvoy.ai/meet/johnanderson
   agentenvoy.sh book https://agentenvoy.ai/meet/johnanderson 2026-05-07T21:30:00Z "Bryan Schwab" bryan@schwab.sh video
-  agentenvoy.sh cancel https://agentenvoy.ai/meet/johnanderson/a2tztn
+  agentenvoy.sh cancel https://agentenvoy.ai/meet/johnanderson cmok854hm000113il5mj3ecew
 EOF
   exit 1
 }
@@ -41,7 +41,7 @@ case "$CMD" in
     curl -s "$AGENT_JSON_URL" > "$TMPFILE"
     python3 - "$TMPFILE" <<'PYEOF'
 import json, sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 with open(sys.argv[1]) as f:
     data = json.load(f)
@@ -69,14 +69,12 @@ for s in slots:
     start = s['start']
     dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
     date_str = dt.strftime('%A, %B %d')
-    time_str = dt.strftime('%-I:%M %p') + ' UTC'
+    # Use localStart with proper ISO offset now
     local = s.get('localStart', '')
     if local:
-        try:
-            ldt = datetime.fromisoformat(local)
-            time_str = ldt.strftime('%-I:%M %p') + ' local'
-        except Exception:
-            time_str = local + ' local'
+        time_str = local[11:16] + " local"  # Just show HH:MM from localStart
+    else:
+        time_str = dt.strftime('%-I:%M %p UTC')
     tier = s.get('tier', '')
     by_date.setdefault(date_str, []).append((time_str, tier))
 
@@ -153,6 +151,7 @@ if structured.get('ok'):
     fmt = structured.get('format', '?')
     meet = structured.get('meetLink', 'N/A')
     sid = structured.get('sessionId', 'N/A')
+    murl = structured.get('meetingUrl', 'N/A')
     print(f"✅ Booking confirmed!")
     print(f"   Status: {status}")
     print(f"   Date/Time: {dt} (UTC)")
@@ -160,33 +159,20 @@ if structured.get('ok'):
     print(f"   Format: {fmt}")
     print(f"   Meet Link: {meet}")
     print(f"   Session ID: {sid}")
+    if murl != 'N/A':
+        print(f"   Session URL: {murl}")
+    print()
+    print(f"💡 To cancel: agentenvoy.sh cancel <meeting_url> {sid}")
 else:
     print(f"⚠️ Unexpected response: {json.dumps(structured, indent=2)}")
 PYEOF
     ;;
 
-  cancel|cancel_lock|cancel_meeting)
+  cancel|cancel_meeting)
     SESSION_ID="${3:-}"
-    SESSION_URL="${4:-}"
-    # cancel_meeting requires the session-specific URL (e.g., /meet/slug/CODE), not just the vanity URL
-    # If a full session URL is provided as the 2nd arg, use it directly
-    # If only vanity URL + sessionId given, we need to find the session code from calendar description
-    if [[ "$MEETING_URL" == */meet/*/* ]]; then
-      # Already a session-specific URL (contains the code)
-      CANCEL_URL="$MEETING_URL"
-    else
-      # Vanity URL — check if SESSION_URL is provided as 4th arg
-      if [[ -n "$SESSION_URL" ]]; then
-        CANCEL_URL="$SESSION_URL"
-      else
-        echo "⚠️  cancel_meeting requires the session-specific URL (e.g., https://agentenvoy.ai/meet/johnanderson/abc123)" >&2
-        echo "   The vanity URL alone won't work. Find the session code in the calendar event description." >&2
-        echo "   Usage: agentenvoy.sh cancel <session_url_with_code>" >&2
-        exit 1
-      fi
-    fi
+    [[ -z "$SESSION_ID" ]] && usage
 
-    echo "Cancelling booking at ${CANCEL_URL}..." >&2
+    echo "Cancelling booking (session: $SESSION_ID)..." >&2
 
     PAYLOAD=$(python3 -c "
 import json, sys
@@ -198,12 +184,13 @@ payload = {
         'name': 'cancel_meeting',
         'arguments': {
             'meetingUrl': sys.argv[1],
+            'sessionId': sys.argv[2],
             'notifyHost': True
         }
     }
 }
 print(json.dumps(payload))
-" "$CANCEL_URL")
+" "$MEETING_URL" "$SESSION_ID")
 
     TMPFILE=$(mktemp)
     trap "rm -f $TMPFILE" EXIT
@@ -232,13 +219,16 @@ if not structured:
             break
 
 if result.get('isError'):
-    # MCP tool returned an error
     msgs = [c.get('text', '') for c in result.get('content', []) if c.get('type') == 'text']
     print(f"❌ Cancel failed: {'; '.join(msgs)}")
     sys.exit(1)
 
 if structured.get('ok'):
-    print(f"✅ Booking cancelled: {structured.get('sessionId', 'N/A')}")
+    sid = structured.get('sessionId', 'N/A')
+    idempotent = structured.get('idempotent', False)
+    print(f"✅ Booking cancelled: {sid}")
+    if idempotent:
+        print("   (Was already cancelled)")
 else:
     reason = structured.get('reason', 'unknown')
     message = structured.get('message', '')
